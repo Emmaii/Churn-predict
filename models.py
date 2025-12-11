@@ -1,13 +1,26 @@
 import os
 from datetime import datetime
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Text, Boolean, JSON
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import (
+    create_engine, Column, Integer, String, Float, DateTime, Text, Boolean, JSON
+)
+from sqlalchemy.orm import sessionmaker, declarative_base
 
-DATABASE_URL = os.environ.get('DATABASE_URL')
+# Get DATABASE_URL from environment (Streamlit Cloud secrets or local env)
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
-engine = create_engine(DATABASE_URL) if DATABASE_URL else None
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine) if engine else None
+# If no DATABASE_URL provided, fall back to a local sqlite DB file.
+if DATABASE_URL:
+    connect_args = {}
+    if DATABASE_URL.startswith("sqlite"):
+        connect_args = {"check_same_thread": False}
+    engine = create_engine(DATABASE_URL, connect_args=connect_args)
+else:
+    sqlite_path = os.path.join(os.getcwd(), "churn_app.db")
+    DATABASE_URL = f"sqlite:///{sqlite_path}"
+    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+
+# Session factory and Base model
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 

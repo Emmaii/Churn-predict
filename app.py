@@ -22,14 +22,18 @@ import uuid
 import warnings
 warnings.filterwarnings('ignore')
 
+# database availability check
+DB_AVAILABLE = False
 try:
-    from models import (
-        init_db, get_db, PredictionHistory, ModelVersion, 
-        ABExperiment, ABExperimentResult, DataDriftLog, CLVPrediction
-    )
-    DB_AVAILABLE = init_db()
-except:
+    # import models (this will import engine, SessionLocal, models and init_db)
+    from models import init_db, get_db, PredictionHistory, ModelVersion, ABExperiment, ABExperimentResult, DataDriftLog, CLVPrediction
+    # initialize DB (creates tables) and set DB_AVAILABLE accordingly
+    DB_AVAILABLE = bool(init_db())
+except Exception as e:
+    # If import or init fails, keep DB_AVAILABLE False but print error for debugging
+    print("DB unavailable:", e)
     DB_AVAILABLE = False
+
 
 
 def simple_oversample(X, y):
