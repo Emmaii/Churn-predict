@@ -17,8 +17,19 @@ from sklearn.metrics import (
 from sklearn.cluster import KMeans
 from sklearn.inspection import permutation_importance
 from xgboost import XGBClassifier
+from datetime import datetime
+import uuid
 import warnings
 warnings.filterwarnings('ignore')
+
+try:
+    from models import (
+        init_db, get_db, PredictionHistory, ModelVersion, 
+        ABExperiment, ABExperimentResult, DataDriftLog, CLVPrediction
+    )
+    DB_AVAILABLE = init_db()
+except:
+    DB_AVAILABLE = False
 
 
 def simple_oversample(X, y):
@@ -298,7 +309,7 @@ initialize_session_state()
 
 st.markdown('<h1 class="main-header">📊 Customer Churn Prediction Platform</h1>', unsafe_allow_html=True)
 
-tabs = st.tabs(["📁 Data Upload", "🔧 Preprocessing", "🤖 Model Training", "📈 Analytics Dashboard", "🎯 Predictions", "👥 Segmentation"])
+tabs = st.tabs(["📁 Data Upload", "🔧 Preprocessing", "🤖 Model Training", "📈 Analytics Dashboard", "🎯 Predictions", "👥 Segmentation", "📊 History", "💰 CLV", "🧪 A/B Testing"])
 
 with tabs[0]:
     st.header("Data Upload & Profiling")
@@ -829,6 +840,25 @@ with tabs[4]:
                     st.warning(rec)
                 else:
                     st.info(rec)
+            
+            if DB_AVAILABLE:
+                try:
+                    db = get_db()
+                    if db:
+                        pred_record = PredictionHistory(
+                            customer_id=str(uuid.uuid4())[:8],
+                            churn_probability=float(probability),
+                            risk_level=risk,
+                            feature_values=feature_inputs,
+                            model_name=st.session_state.best_model_name,
+                            model_version="1.0"
+                        )
+                        db.add(pred_record)
+                        db.commit()
+                        db.close()
+                        st.success("Prediction saved to history!")
+                except Exception as e:
+                    pass
 
 with tabs[5]:
     st.header("Customer Segmentation")
@@ -906,6 +936,238 @@ with tabs[5]:
                 mime="text/csv"
             )
 
+with tabs[6]:
+    st.header("Prediction History")
+    
+    if not DB_AVAILABLE:
+        st.warning("Database not available. Prediction history requires database connection.")
+    else:
+        try:
+            db = get_db()
+            if db:
+                predictions = db.query(PredictionHistory).order_by(PredictionHistory.prediction_date.desc()).limit(100).all()
+                db.close()
+                
+                if predictions:
+                    st.subheader(f"Recent Predictions ({len(predictions)} records)")
+                    
+                    history_data = []
+                    for pred in predictions:
+                        history_data.append({
+                            'Customer ID': pred.customer_id,
+                            'Date': pred.prediction_date.strftime('%Y-%m-%d %H:%M') if pred.prediction_date else 'N/A',
+                            'Churn Probability': f"{pred.churn_probability:.1%}",
+                            'Risk Level': pred.risk_level,
+                            'Model': pred.model_name or 'N/A'
+                        })
+                    
+                    st.dataframe(pd.DataFrame(history_data), use_container_width=True)
+                    
+                    col1, col2, col3 = st.columns(3)
+                    
+                    risk_counts = pd.DataFrame(history_data)['Risk Level'].value_counts()
+                    
+                    with col1:
+                        high_risk = risk_counts.get('HIGH RISK', 0)
+                        st.metric("High Risk Predictions", high_risk)
+                    with col2:
+                        medium_risk = risk_counts.get('MEDIUM RISK', 0)
+                        st.metric("Medium Risk Predictions", medium_risk)
+                    with col3:
+                        low_risk = risk_counts.get('LOW RISK', 0)
+                        st.metric("Low Risk Predictions", low_risk)
+                    
+                    fig = px.pie(
+                        values=risk_counts.values,
+                        names=risk_counts.index,
+                        title="Prediction Distribution by Risk Level",
+                        color_discrete_map={'HIGH RISK': '#f5365c', 'MEDIUM RISK': '#fb6340', 'LOW RISK': '#2dce89'}
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("No predictions recorded yet. Make predictions in the Predictions tab to see history.")
+        except Exception as e:
+            st.error(f"Error loading prediction history: {str(e)}")
+
+with tabs[7]:
+    st.header("Customer Lifetime Value (CLV) Prediction")
+    
+    if st.session_state.cleaned_data is None:
+        st.warning("Please preprocess data first to enable CLV predictions.")
+    else:
+        st.subheader("CLV Estimation")
+        st.info("CLV prediction uses customer data to estimate the total revenue a customer will generate over their lifetime.")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            avg_monthly_revenue = st.number_input("Average Monthly Revenue per Customer ($)", min_value=0.0, value=50.0)
+            avg_margin = st.slider("Profit Margin (%)", 0, 100, 30)
+        
+        with col2:
+            discount_rate = st.slider("Annual Discount Rate (%)", 0, 30, 10)
+        
+        if st.button("Calculate CLV for All Customers", type="primary"):
+            if st.session_state.best_model is not None:
+                df = st.session_state.cleaned_data.copy()
+                feature_cols = st.session_state.feature_columns
+                
+                X = df[feature_cols]
+                X_scaled = st.session_state.scaler.transform(X)
+                
+                churn_probs = st.session_state.best_model.predict_proba(X_scaled)[:, 1]
+                retention_rates = 1 - churn_probs
+                
+                monthly_discount = (1 + discount_rate / 100) ** (1/12) - 1
+                margin_factor = avg_margin / 100
+                
+                clv_values = []
+                for retention in retention_rates:
+                    if retention < 0.01:
+                        retention = 0.01
+                    expected_lifetime = 1 / (1 - retention) if retention < 0.99 else 120
+                    clv = avg_monthly_revenue * margin_factor * expected_lifetime * (1 / (1 + monthly_discount))
+                    clv_values.append(clv)
+                
+                df['Churn_Probability'] = churn_probs
+                df['Retention_Rate'] = retention_rates
+                df['Predicted_CLV'] = clv_values
+                
+                clv_bins = [0, 500, 1000, 2500, 5000, float('inf')]
+                clv_labels = ['Very Low', 'Low', 'Medium', 'High', 'Very High']
+                df['CLV_Segment'] = pd.cut(df['Predicted_CLV'], bins=clv_bins, labels=clv_labels)
+                
+                st.subheader("CLV Summary")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Average CLV", f"${df['Predicted_CLV'].mean():,.0f}")
+                with col2:
+                    st.metric("Median CLV", f"${df['Predicted_CLV'].median():,.0f}")
+                with col3:
+                    st.metric("Total CLV", f"${df['Predicted_CLV'].sum():,.0f}")
+                with col4:
+                    st.metric("Customers", len(df))
+                
+                st.subheader("CLV Distribution")
+                fig = px.histogram(df, x='Predicted_CLV', nbins=30, title="Customer Lifetime Value Distribution")
+                fig.update_layout(xaxis_title="Predicted CLV ($)", yaxis_title="Count")
+                st.plotly_chart(fig, use_container_width=True)
+                
+                st.subheader("CLV by Segment")
+                segment_summary = df.groupby('CLV_Segment').agg({
+                    'Predicted_CLV': ['count', 'mean', 'sum'],
+                    'Churn_Probability': 'mean'
+                }).round(2)
+                segment_summary.columns = ['Count', 'Avg CLV', 'Total CLV', 'Avg Churn Prob']
+                st.dataframe(segment_summary, use_container_width=True)
+                
+                fig = px.scatter(
+                    df, x='Churn_Probability', y='Predicted_CLV',
+                    color='CLV_Segment', title="CLV vs Churn Probability",
+                    labels={'Churn_Probability': 'Churn Probability', 'Predicted_CLV': 'Predicted CLV ($)'}
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                
+                csv = df[['Churn_Probability', 'Retention_Rate', 'Predicted_CLV', 'CLV_Segment']].to_csv(index=False)
+                st.download_button("Download CLV Predictions", csv, "clv_predictions.csv", "text/csv")
+            else:
+                st.warning("Please train a model first in the Model Training tab.")
+
+with tabs[8]:
+    st.header("A/B Testing Framework")
+    
+    if not DB_AVAILABLE:
+        st.warning("Database not available. A/B Testing requires database connection.")
+    else:
+        st.subheader("Retention Strategy Experiments")
+        
+        exp_tab1, exp_tab2 = st.tabs(["Create Experiment", "View Experiments"])
+        
+        with exp_tab1:
+            st.subheader("Create New A/B Experiment")
+            
+            exp_name = st.text_input("Experiment Name", placeholder="e.g., Discount vs Loyalty Rewards")
+            exp_description = st.text_area("Description", placeholder="Describe the purpose and hypothesis of this experiment")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                control_strategy = st.text_area("Control Strategy", placeholder="Describe the control group treatment")
+                start_date = st.date_input("Start Date")
+            with col2:
+                treatment_strategy = st.text_area("Treatment Strategy", placeholder="Describe the treatment group strategy")
+                end_date = st.date_input("End Date")
+            
+            target_segment = st.selectbox("Target Segment", ["All Customers", "High Risk", "Medium Risk", "Low Risk"])
+            sample_size = st.number_input("Sample Size per Group", min_value=10, value=100)
+            
+            if st.button("Create Experiment", type="primary"):
+                if exp_name and control_strategy and treatment_strategy:
+                    try:
+                        db = get_db()
+                        if db:
+                            new_exp = ABExperiment(
+                                experiment_name=exp_name,
+                                description=exp_description,
+                                start_date=datetime.combine(start_date, datetime.min.time()),
+                                end_date=datetime.combine(end_date, datetime.min.time()),
+                                status='active',
+                                control_strategy=control_strategy,
+                                treatment_strategy=treatment_strategy,
+                                target_segment=target_segment,
+                                sample_size=sample_size
+                            )
+                            db.add(new_exp)
+                            db.commit()
+                            db.close()
+                            st.success(f"Experiment '{exp_name}' created successfully!")
+                    except Exception as e:
+                        st.error(f"Error creating experiment: {str(e)}")
+                else:
+                    st.warning("Please fill in all required fields.")
+        
+        with exp_tab2:
+            st.subheader("Active Experiments")
+            
+            try:
+                db = get_db()
+                if db:
+                    experiments = db.query(ABExperiment).order_by(ABExperiment.created_at.desc()).all()
+                    db.close()
+                    
+                    if experiments:
+                        for exp in experiments:
+                            with st.expander(f"{exp.experiment_name} - {exp.status.upper()}", expanded=False):
+                                col1, col2 = st.columns(2)
+                                with col1:
+                                    st.write(f"**Description:** {exp.description or 'N/A'}")
+                                    st.write(f"**Target Segment:** {exp.target_segment or 'All'}")
+                                    st.write(f"**Sample Size:** {exp.sample_size or 'N/A'}")
+                                with col2:
+                                    st.write(f"**Control:** {exp.control_strategy or 'N/A'}")
+                                    st.write(f"**Treatment:** {exp.treatment_strategy or 'N/A'}")
+                                    st.write(f"**Period:** {exp.start_date} to {exp.end_date}")
+                                
+                                st.markdown("---")
+                                st.subheader("Simulated Results")
+                                
+                                np.random.seed(exp.id)
+                                control_churn = np.random.uniform(0.15, 0.25)
+                                treatment_churn = control_churn * np.random.uniform(0.7, 0.95)
+                                
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("Control Churn Rate", f"{control_churn:.1%}")
+                                with col2:
+                                    st.metric("Treatment Churn Rate", f"{treatment_churn:.1%}")
+                                with col3:
+                                    improvement = (control_churn - treatment_churn) / control_churn * 100
+                                    st.metric("Improvement", f"{improvement:.1f}%", delta=f"{improvement:.1f}%")
+                    else:
+                        st.info("No experiments created yet. Create your first experiment above.")
+            except Exception as e:
+                st.error(f"Error loading experiments: {str(e)}")
+
 st.sidebar.markdown("---")
 st.sidebar.markdown("### About")
 st.sidebar.info("""
@@ -915,6 +1177,8 @@ This Customer Churn Prediction Platform helps you:
 - Identify at-risk customers
 - Get actionable retention recommendations
 - Segment customers for targeted marketing
+- Predict Customer Lifetime Value (CLV)
+- Run A/B tests on retention strategies
 """)
 
 st.sidebar.markdown("### Quick Guide")
@@ -925,4 +1189,11 @@ st.sidebar.markdown("""
 4. **Analyze** model performance
 5. **Predict** individual customer churn
 6. **Segment** customers into groups
+7. **CLV** - Calculate customer lifetime value
+8. **A/B Testing** - Compare retention strategies
 """)
+
+if DB_AVAILABLE:
+    st.sidebar.success("Database Connected")
+else:
+    st.sidebar.warning("Database Not Available")

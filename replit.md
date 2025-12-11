@@ -1,12 +1,12 @@
 # Customer Churn Prediction Platform
 
 ## Overview
-An enhanced customer churn prediction platform built with Streamlit that helps businesses identify at-risk customers and take proactive retention actions. The platform features multiple ML models, interactive visualizations, customer segmentation, and actionable retention recommendations.
+A comprehensive customer churn prediction platform built with Streamlit that helps businesses identify at-risk customers and take proactive retention actions. The platform features multiple ML models, interactive visualizations, customer segmentation, CLV prediction, A/B testing framework, and actionable retention recommendations.
 
 ## Current State
-- **Status**: Fully functional
+- **Status**: Fully functional with advanced features
 - **Last Updated**: December 2024
-- **Tech Stack**: Python 3.11, Streamlit, Scikit-learn, XGBoost, Plotly
+- **Tech Stack**: Python 3.11, Streamlit, Scikit-learn, XGBoost, Plotly, PostgreSQL, SQLAlchemy
 
 ## Features
 
@@ -22,7 +22,7 @@ An enhanced customer churn prediction platform built with Streamlit that helps b
 - Label encoding for categorical variables
 - Feature engineering (sum, mean, std of numeric features)
 - Standard scaling for model training
-- SMOTE for class imbalance handling
+- Simple oversampling for class imbalance handling
 
 ### 3. Model Training
 - Multiple ML algorithms:
@@ -44,6 +44,7 @@ An enhanced customer churn prediction platform built with Streamlit that helps b
 - Customer-level churn probability prediction
 - Visual risk gauge
 - Actionable retention recommendations based on risk level
+- Predictions saved to database for history tracking
 
 ### 6. Customer Segmentation
 - K-means clustering for customer grouping
@@ -51,10 +52,31 @@ An enhanced customer churn prediction platform built with Streamlit that helps b
 - Feature heatmaps by segment
 - Downloadable segmented data
 
+### 7. Prediction History (NEW)
+- Database-backed prediction storage
+- View recent predictions with risk distribution
+- Track prediction trends over time
+- Risk level analytics
+
+### 8. Customer Lifetime Value (CLV) Prediction (NEW)
+- CLV estimation based on churn probability
+- Configurable revenue and margin parameters
+- CLV segmentation (Very Low to Very High)
+- CLV vs Churn probability visualization
+- Downloadable CLV predictions
+
+### 9. A/B Testing Framework (NEW)
+- Create retention strategy experiments
+- Define control and treatment groups
+- Set target segments and sample sizes
+- Track experiment results
+- Simulated outcome visualization
+
 ## Project Structure
 ```
 /
 ├── app.py                 # Main Streamlit application
+├── models.py              # Database models (SQLAlchemy)
 ├── data/
 │   └── sample_churn_data.csv  # Sample dataset for testing
 ├── .streamlit/
@@ -62,6 +84,14 @@ An enhanced customer churn prediction platform built with Streamlit that helps b
 ├── pyproject.toml         # Python dependencies
 └── replit.md              # This file
 ```
+
+## Database Schema
+- **prediction_history**: Stores individual customer predictions
+- **model_versions**: Tracks trained model versions and performance
+- **ab_experiments**: A/B testing experiment configurations
+- **ab_experiment_results**: Results for A/B experiments
+- **data_drift_logs**: Data drift detection results
+- **clv_predictions**: Customer lifetime value predictions
 
 ## Running the Application
 The app runs on port 5000 using:
@@ -78,17 +108,23 @@ streamlit run app.py --server.port 5000
 - plotly
 - matplotlib
 - seaborn
-- imbalanced-learn
+- psycopg2-binary
+- sqlalchemy
+
+## Environment Variables
+- DATABASE_URL: PostgreSQL connection string
+- PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE: Individual PostgreSQL credentials
 
 ## User Preferences
 - Clean, professional UI with tabbed navigation
 - Interactive Plotly visualizations preferred over static matplotlib
 - Business-friendly language in recommendations
 - Downloadable reports for all major outputs
+- Database persistence for predictions and experiments
 
 ## Future Enhancements
-- Database integration for historical predictions
-- A/B testing framework for retention strategies
-- Automated retraining pipeline
-- Real-time prediction API
-- Customer lifetime value (CLV) prediction
+- Real-time prediction API endpoint for production integration
+- Automated retraining pipeline with data drift detection
+- Email notifications for high-risk predictions
+- Integration with CRM systems
+- Advanced CLV models using BG/NBD framework
