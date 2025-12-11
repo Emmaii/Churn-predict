@@ -309,7 +309,7 @@ initialize_session_state()
 
 st.markdown('<h1 class="main-header">📊 Customer Churn Prediction Platform</h1>', unsafe_allow_html=True)
 
-tabs = st.tabs(["📁 Data Upload", "🔧 Preprocessing", "🤖 Model Training", "📈 Analytics Dashboard", "🎯 Predictions", "👥 Segmentation", "📊 History", "💰 CLV", "🧪 A/B Testing"])
+tabs = st.tabs(["📁 Data Upload", "🔧 Preprocessing", "🤖 Model Training", "📈 Analytics Dashboard", "🎯 Predictions", "👥 Segmentation", "📊 History", "💰 CLV", "🧪 A/B Testing", "🔍 Data Drift"])
 
 with tabs[0]:
     st.header("Data Upload & Profiling")
@@ -1168,6 +1168,204 @@ with tabs[8]:
             except Exception as e:
                 st.error(f"Error loading experiments: {str(e)}")
 
+with tabs[9]:
+    st.header("Data Drift Detection")
+    
+    if st.session_state.cleaned_data is None:
+        st.warning("Please preprocess data first to enable data drift detection.")
+    else:
+        st.subheader("Monitor Model Performance & Data Quality")
+        st.info("Data drift detection helps identify when your production data distribution differs from training data, indicating potential model degradation.")
+        
+        if st.session_state.best_model is None:
+            st.warning("Please train a model first in the Model Training tab.")
+        else:
+            reference_data = st.session_state.cleaned_data.copy()
+            feature_cols = st.session_state.feature_columns
+            
+            st.subheader("Reference Data Statistics (Training Data)")
+            reference_stats = reference_data[feature_cols].describe().T
+            reference_stats = reference_stats[['mean', 'std', 'min', 'max']]
+            st.dataframe(reference_stats.round(3), use_container_width=True)
+            
+            drift_method = st.radio(
+                "Choose Drift Detection Method:",
+                ["Upload Current Data", "Simulate Drift (Demo)"],
+                help="Upload real production data to detect actual drift, or use simulation for testing purposes."
+            )
+            
+            current_data = None
+            data_source = "simulated"
+            
+            if drift_method == "Upload Current Data":
+                st.subheader("Upload Current/Production Data")
+                current_file = st.file_uploader("Upload current data (CSV)", type=['csv'], key='drift_upload')
+                
+                if current_file is not None:
+                    try:
+                        current_df = pd.read_csv(current_file)
+                        
+                        missing_cols = [col for col in feature_cols if col not in current_df.columns]
+                        if missing_cols:
+                            st.error(f"Current data is missing required features: {missing_cols}")
+                        else:
+                            current_data = current_df[feature_cols].copy()
+                            
+                            for col in current_data.columns:
+                                if current_data[col].dtype == 'object':
+                                    if col in st.session_state.label_encoders:
+                                        try:
+                                            current_data[col] = st.session_state.label_encoders[col].transform(current_data[col])
+                                        except:
+                                            current_data[col] = 0
+                                    else:
+                                        current_data[col] = pd.to_numeric(current_data[col], errors='coerce').fillna(0)
+                            
+                            current_data = current_data.fillna(current_data.mean())
+                            data_source = "uploaded"
+                            st.success(f"Loaded {len(current_data)} records from current data file.")
+                    except Exception as e:
+                        st.error(f"Error loading current data: {str(e)}")
+            else:
+                st.subheader("Simulate Data Drift (Demo Mode)")
+                st.warning("This mode simulates drift by adding noise to training data. For production use, upload real current data.")
+                drift_level = st.slider("Simulate Drift Level", 0.0, 1.0, 0.1, 0.05)
+            
+            run_drift = st.button("Run Drift Detection", type="primary")
+            
+            if run_drift:
+                if drift_method == "Upload Current Data" and current_data is None:
+                    st.warning("Please upload current data first to run drift detection.")
+                else:
+                    if current_data is None:
+                        current_data = reference_data[feature_cols].copy()
+                        for col in current_data.columns:
+                            if current_data[col].dtype in ['int64', 'float64']:
+                                noise = np.random.normal(0, drift_level * current_data[col].std(), len(current_data))
+                                current_data[col] = current_data[col] + noise
+                    
+                    drift_results = []
+                    drift_detected = False
+                    
+                    for col in feature_cols:
+                        ref_mean = reference_data[col].mean()
+                        ref_std = reference_data[col].std()
+                        new_mean = current_data[col].mean()
+                        new_std = current_data[col].std()
+                        
+                        mean_diff = abs(ref_mean - new_mean) / (ref_std + 0.0001)
+                        std_ratio = new_std / (ref_std + 0.0001)
+                        
+                        drift_score = mean_diff + abs(1 - std_ratio)
+                        is_drifted = drift_score > 0.5
+                        
+                        if is_drifted:
+                            drift_detected = True
+                        
+                        drift_results.append({
+                            'Feature': col,
+                            'Reference Mean': round(ref_mean, 3),
+                            'Current Mean': round(new_mean, 3),
+                            'Reference Std': round(ref_std, 3),
+                            'Current Std': round(new_std, 3),
+                            'Drift Score': round(drift_score, 3),
+                            'Drifted': 'Yes' if is_drifted else 'No'
+                        })
+                
+                st.subheader("Drift Analysis Results")
+                
+                drift_df = pd.DataFrame(drift_results)
+                
+                def highlight_drift(row):
+                    if row['Drifted'] == 'Yes':
+                        return ['background-color: #ffcccc'] * len(row)
+                    return [''] * len(row)
+                
+                st.dataframe(drift_df.style.apply(highlight_drift, axis=1), use_container_width=True)
+                
+                drifted_features = [r['Feature'] for r in drift_results if r['Drifted'] == 'Yes']
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Features Analyzed", len(feature_cols))
+                with col2:
+                    st.metric("Features with Drift", len(drifted_features))
+                with col3:
+                    drift_pct = len(drifted_features) / len(feature_cols) * 100 if feature_cols else 0
+                    st.metric("Drift Percentage", f"{drift_pct:.1f}%")
+                
+                if drift_detected:
+                    st.error("Data drift detected! Consider retraining your model.")
+                    st.markdown("### Recommended Actions:")
+                    st.markdown("""
+                    1. **Investigate the cause** - Check for data collection issues or real distribution changes
+                    2. **Collect new training data** - Gather representative samples from the current distribution
+                    3. **Retrain the model** - Use updated data to maintain prediction accuracy
+                    4. **Monitor performance** - Track model metrics after retraining
+                    """)
+                else:
+                    st.success("No significant data drift detected. Model performance should remain stable.")
+                
+                if DB_AVAILABLE:
+                    try:
+                        db = get_db()
+                        if db:
+                            drift_log = DataDriftLog(
+                                model_id=1,
+                                feature_name='all_features',
+                                drift_score=float(np.mean([r['Drift Score'] for r in drift_results])),
+                                drift_detected=drift_detected,
+                                reference_stats={
+                                    'features_analyzed': len(feature_cols),
+                                    'reference_sample_size': len(reference_data)
+                                },
+                                current_stats={
+                                    'drifted_count': len(drifted_features),
+                                    'current_sample_size': len(current_data),
+                                    'data_source': data_source
+                                }
+                            )
+                            db.add(drift_log)
+                            db.commit()
+                            db.close()
+                            st.info(f"Drift check logged to database (source: {data_source}).")
+                    except Exception as e:
+                        st.warning(f"Could not save drift check to database: {str(e)}")
+                
+                st.subheader("Drift Score Visualization")
+                fig = px.bar(
+                    drift_df, x='Feature', y='Drift Score',
+                    color='Drifted',
+                    color_discrete_map={'Yes': '#f5365c', 'No': '#2dce89'},
+                    title="Feature Drift Scores"
+                )
+                fig.add_hline(y=0.5, line_dash="dash", line_color="red", annotation_text="Drift Threshold")
+                fig.update_layout(xaxis_tickangle=-45, height=500)
+                st.plotly_chart(fig, use_container_width=True)
+            
+            if DB_AVAILABLE:
+                st.subheader("Drift Detection History")
+                try:
+                    db = get_db()
+                    if db:
+                        drift_logs = db.query(DataDriftLog).order_by(DataDriftLog.check_date.desc()).limit(10).all()
+                        db.close()
+                        
+                        if drift_logs:
+                            history_data = []
+                            for log in drift_logs:
+                                history_data.append({
+                                    'Date': log.check_date.strftime('%Y-%m-%d %H:%M') if log.check_date else 'N/A',
+                                    'Feature': log.feature_name,
+                                    'Drift Score': round(log.drift_score, 3) if log.drift_score else 0,
+                                    'Drift Detected': 'Yes' if log.drift_detected else 'No'
+                                })
+                            st.dataframe(pd.DataFrame(history_data), use_container_width=True)
+                        else:
+                            st.info("No drift checks recorded yet.")
+                except Exception as e:
+                    pass
+
 st.sidebar.markdown("---")
 st.sidebar.markdown("### About")
 st.sidebar.info("""
@@ -1191,6 +1389,7 @@ st.sidebar.markdown("""
 6. **Segment** customers into groups
 7. **CLV** - Calculate customer lifetime value
 8. **A/B Testing** - Compare retention strategies
+9. **Data Drift** - Monitor model performance
 """)
 
 if DB_AVAILABLE:

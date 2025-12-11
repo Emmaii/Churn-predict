@@ -80,6 +80,7 @@ class DataDriftLog(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     check_date = Column(DateTime, default=datetime.utcnow)
+    model_id = Column(Integer, nullable=True)
     feature_name = Column(String(100), nullable=False)
     drift_score = Column(Float, nullable=True)
     drift_detected = Column(Boolean, default=False)
@@ -87,6 +88,8 @@ class DataDriftLog(Base):
     current_mean = Column(Float, nullable=True)
     reference_std = Column(Float, nullable=True)
     current_std = Column(Float, nullable=True)
+    reference_stats = Column(JSON, nullable=True)
+    current_stats = Column(JSON, nullable=True)
 
 
 class CLVPrediction(Base):
