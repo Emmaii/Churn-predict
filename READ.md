@@ -82,7 +82,7 @@ A comprehensive customer churn prediction platform built with Streamlit that hel
 ├── .streamlit/
 │   └── config.toml        # Streamlit configuration
 ├── pyproject.toml         # Python dependencies
-└── replit.md              # This file
+└── READ.md              # This file
 ```
 
 ## Database Schema
@@ -95,9 +95,7 @@ A comprehensive customer churn prediction platform built with Streamlit that hel
 
 ## Running the Application
 The app runs on port 5000 using:
-```bash
-streamlit run app.py --server.port 5000
-```
+streamlit run app.py 
 
 ## Dependencies
 - streamlit
